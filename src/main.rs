@@ -1,45 +1,24 @@
 use std::collections::HashMap;
-use tokio_postgres::NoTls;
 
 #[tokio::main]
 async fn main() {
     env_logger::init();
     dotenv::dotenv().ok();
-    let (client_postgres, connection_postgres) =
-        tokio_postgres::connect(&std::env::var("POSTGRES_CONN_STR").unwrap(), NoTls)
-            .await
-            .unwrap();
-    tokio::spawn(async move {
-        if let Err(e) = connection_postgres.await {
-            eprintln!("postgres conn error: {}", e);
-        }
-    });
+    let config = Config::new_from_envs();
+    let client_clickhouse = clickhouse::Client::default().with_url(config.clickhouse_url);
     let (tx, rx) = std::sync::mpsc::channel::<Kline>();
-    let symbols = std::env::var("CONFIG_SYMBOLS")
-        .unwrap()
-        .split(",")
-        .into_iter()
-        .map(|s| s.to_string())
-        .collect::<Vec<String>>();
-    let timeframes = std::env::var("CONFIG_TIMEFRAMES")
-        .unwrap()
-        .split(",")
-        .into_iter()
-        .map(|s| KlineTimeframe::new_from_str(s))
-        .collect::<Vec<KlineTimeframe>>();
     let mut curr_klines = {
         let mut m_symbols = HashMap::new();
-        for symbol in symbols.clone() {
+        for symbol in config.poloniex_symbols.clone() {
             let mut m_timeframes: HashMap<KlineTimeframe, std::option::Option<Kline>> =
                 HashMap::new();
-            for timeframe in timeframes.clone() {
+            for timeframe in config.poloniex_timeframes.clone() {
                 m_timeframes.insert(timeframe, None);
             }
             m_symbols.insert(symbol, m_timeframes);
         }
         m_symbols
     };
-    let config = poloniex_ws_pub::Config::new(poloniex_ws_pub::Channel::Trade, symbols);
     let on_message = |event: poloniex_ws_pub::Event| {
         if let poloniex_ws_pub::Event::Trade(t) = event {
             for trade in t.conv_to_recent_trade_vec() {
@@ -65,18 +44,20 @@ async fn main() {
             match rx.recv_timeout(std::time::Duration::from_millis(100)) {
                 Ok(k) => {
                     log::info!("save kline to db k={:?}", k);
-                    client_postgres
-                        .execute(&k.to_sql_insert(), &[])
-                        .await
-                        .unwrap();
+                    let mut insert_klines = client_clickhouse.insert("klines").unwrap();
+                    insert_klines.write(&k.to_row()).await.unwrap();
+                    insert_klines.end().await.unwrap();
                 }
                 Err(e) => log::debug!("try_recv error {:?}", e),
             }
         }
     });
-    poloniex_ws_pub::listen_pub_channel(&config, on_message)
-        .await
-        .unwrap();
+    poloniex_ws_pub::listen_pub_channel(
+        &poloniex_ws_pub::Config::new(poloniex_ws_pub::Channel::Trade, config.poloniex_symbols),
+        on_message,
+    )
+    .await
+    .unwrap();
 }
 
 mod poloniex_ws_pub {
@@ -327,36 +308,74 @@ impl Kline {
         current_start_min > candle_start_min
     }
 
-    pub fn to_sql_insert(&self) -> String {
-        format!(
-            r#"INSERT INTO public.candles (pair, time_frame, o, h, l, c,
-            utc_begin, volume_bs__buy_base, volume_bs__sell_base, volume_bs__buy_quote,
-            volume_bs__sell_quote) VALUES ('{}','{}',{},{},{},{},to_timestamp({}),
-            {},{},{},{});"#,
-            self.pair,
-            self.time_frame.to_str(),
-            self.o,
-            self.h,
-            self.l,
-            self.c,
-            self.utc_begin / 1000,
-            self.volume_bs.buy_base,
-            self.volume_bs.sell_base,
-            self.volume_bs.buy_quote,
-            self.volume_bs.sell_quote
-        )
+    fn to_row(&self) -> KlineRow {
+        KlineRow {
+            pair: self.pair.clone(),
+            time_frame: self.time_frame.to_str(),
+            o: self.o,
+            h: self.h,
+            l: self.l,
+            c: self.c,
+            utc_begin: time::OffsetDateTime::from_unix_timestamp(self.utc_begin / 1000).unwrap(),
+            volume_bs__buy_base: self.volume_bs.buy_base,
+            volume_bs__sell_base: self.volume_bs.sell_base,
+            volume_bs__buy_quote: self.volume_bs.buy_quote,
+            volume_bs__sell_quote: self.volume_bs.sell_quote,
+        }
     }
+}
+
+#[derive(clickhouse::Row, serde::Serialize)]
+struct KlineRow {
+    pair: String,
+    time_frame: String,
+    o: f64,
+    h: f64,
+    l: f64,
+    c: f64,
+    #[serde(with = "clickhouse::serde::time::datetime")]
+    utc_begin: time::OffsetDateTime,
+    volume_bs__buy_base: f64,
+    volume_bs__sell_base: f64,
+    volume_bs__buy_quote: f64,
+    volume_bs__sell_quote: f64,
 }
 
 fn now_millis() -> i64 {
     chrono::Utc::now().timestamp_millis()
 }
 
+struct Config {
+    pub clickhouse_url: String,
+    pub poloniex_symbols: Vec<String>,
+    pub poloniex_timeframes: Vec<KlineTimeframe>,
+}
+
+impl Config {
+    pub fn new_from_envs() -> Self {
+        Self {
+            clickhouse_url: std::env::var("CLICKHOUSE_URL").unwrap(),
+            poloniex_symbols: std::env::var("CONFIG_SYMBOLS")
+                .unwrap()
+                .split(",")
+                .into_iter()
+                .map(|s| s.to_string())
+                .collect::<Vec<String>>(),
+            poloniex_timeframes: std::env::var("CONFIG_TIMEFRAMES")
+                .unwrap()
+                .split(",")
+                .into_iter()
+                .map(|s| KlineTimeframe::new_from_str(s))
+                .collect::<Vec<KlineTimeframe>>(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod test {
     fn create_recent_trade(timestamp: i64) -> super::RecentTrade {
         super::RecentTrade {
-            tid: "".to_string(),
+            tid: "1".to_string(),
             pair: "BTC_USDT".to_string(),
             price: "10000".to_string(),
             amount: "1".to_string(),

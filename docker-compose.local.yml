@@ -1,10 +1,7 @@
 version: '3.4'
 services:
-  postgres:
-    image: postgres:13.3
-    environment:
-      POSTGRES_PASSWORD: default
-      POSTGRES_USER: default
-      POSTGRES_DB: scrap-poloniex
+  clickhouse:
+    image: docker.io/clickhouse/clickhouse-server:24.8.4.13
     ports:
-    - 5432:5432
+    - 18123:8123
+    mem_limit: 16gb
