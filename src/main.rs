@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use tokio_postgres::NoTls;
 
 #[tokio::main]
@@ -14,22 +15,48 @@ async fn main() {
         }
     });
     let (tx, rx) = std::sync::mpsc::channel::<Kline>();
-    let symbol = "BTC_USDT".to_string();
-    let config = poloniex_ws_pub::Config::new(poloniex_ws_pub::Channel::Trade, symbol);
-    let mut curr_kline: Option<Kline> = None;
+    let symbols = std::env::var("CONFIG_SYMBOLS")
+        .unwrap()
+        .split(",")
+        .into_iter()
+        .map(|s| s.to_string())
+        .collect::<Vec<String>>();
+    let timeframes = std::env::var("CONFIG_TIMEFRAMES")
+        .unwrap()
+        .split(",")
+        .into_iter()
+        .map(|s| KlineTimeframe::new_from_str(s))
+        .collect::<Vec<KlineTimeframe>>();
+    let mut curr_klines = {
+        let mut m_symbols = HashMap::new();
+        for symbol in symbols.clone() {
+            let mut m_timeframes: HashMap<KlineTimeframe, std::option::Option<Kline>> =
+                HashMap::new();
+            for timeframe in timeframes.clone() {
+                m_timeframes.insert(timeframe, None);
+            }
+            m_symbols.insert(symbol, m_timeframes);
+        }
+        m_symbols
+    };
+    let config = poloniex_ws_pub::Config::new(poloniex_ws_pub::Channel::Trade, symbols);
     let on_message = |event: poloniex_ws_pub::Event| {
         if let poloniex_ws_pub::Event::Trade(t) = event {
             for trade in t.conv_to_recent_trade_vec() {
-                if curr_kline.is_none() {
-                    curr_kline = Some(Kline::new_from_trade(KlineTimeframe::Minute(1), &trade));
-                    continue;
+                log::debug!("trade={:?}", trade);
+                let curr_timeframes = curr_klines.get_mut(&trade.pair).unwrap();
+                for (timeframe, curr_kline) in curr_timeframes.iter_mut() {
+                    if curr_kline.is_none() {
+                        curr_kline.replace(Kline::new_from_trade(timeframe.clone(), &trade));
+                        continue;
+                    }
+                    if curr_kline.as_mut().unwrap().expired(&trade) {
+                        tx.send(curr_kline.as_mut().unwrap().clone()).unwrap();
+                        curr_kline.replace(Kline::new_from_trade(timeframe.clone(), &trade));
+                        continue;
+                    }
+                    curr_kline.as_mut().unwrap().apply_recent_trade(&trade);
                 }
-                if curr_kline.as_mut().unwrap().expired(&trade) {
-                    tx.send(curr_kline.as_mut().unwrap().clone()).unwrap();
-                    curr_kline = Some(Kline::new_from_trade(KlineTimeframe::Minute(1), &trade));
-                    continue;
-                }
-                curr_kline.as_mut().unwrap().apply_recent_trade(&trade);
             }
         }
     };
@@ -70,9 +97,15 @@ mod poloniex_ws_pub {
         let channel_str = match config.channel {
             Channel::Trade => "trades",
         };
+        let sumbols_str = config
+            .symbols
+            .iter()
+            .map(|s| format!(r#""{}""#, s))
+            .collect::<Vec<String>>()
+            .join(",");
         let subscribe_text = format!(
-            r#"{{"event": "subscribe", "channel": ["{}"], "symbols": ["{}"]}}"#,
-            channel_str, config.symbol
+            r#"{{"event": "subscribe", "channel": ["{}"], "symbols": [{}]}}"#,
+            channel_str, sumbols_str
         );
         log::info!("subscribe_text={subscribe_text}");
         socket.send(Message::Text(subscribe_text)).await?;
@@ -110,12 +143,12 @@ mod poloniex_ws_pub {
 
     pub struct Config {
         channel: Channel,
-        symbol: String,
+        symbols: Vec<String>,
     }
 
     impl Config {
-        pub fn new(channel: Channel, symbol: String) -> Self {
-            Self { channel, symbol }
+        pub fn new(channel: Channel, symbols: Vec<String>) -> Self {
+            Self { channel, symbols }
         }
     }
 
@@ -200,11 +233,39 @@ struct Kline {
     last_tid: i64,
 }
 
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, Eq, PartialEq, Hash)]
 pub enum KlineTimeframe {
     Minute(i64),
     Hour(i64),
     Day(i64),
+}
+
+impl KlineTimeframe {
+    fn new_from_str(s: &str) -> Self {
+        let n = s[0..s.len() - 1].parse::<i64>().unwrap();
+        match s.chars().last().unwrap() {
+            'm' => KlineTimeframe::Minute(n),
+            'h' => KlineTimeframe::Hour(n),
+            'd' => KlineTimeframe::Day(n),
+            _ => panic!("unknown time frame s={}", s),
+        }
+    }
+
+    fn to_str(&self) -> String {
+        match self {
+            KlineTimeframe::Minute(n) => format!("{}m", n),
+            KlineTimeframe::Hour(n) => format!("{}h", n),
+            KlineTimeframe::Day(n) => format!("{}d", n),
+        }
+    }
+
+    fn to_inserval_millis(&self) -> i64 {
+        match self {
+            KlineTimeframe::Minute(n) => n * 60 * 1000,
+            KlineTimeframe::Hour(n) => n * 60 * 60 * 1000,
+            KlineTimeframe::Day(n) => n * 24 * 60 * 60 * 1000,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -260,34 +321,25 @@ impl Kline {
     }
 
     pub fn expired(&self, recent_trade: &RecentTrade) -> bool {
-        let interval_millis = match self.time_frame {
-            KlineTimeframe::Minute(n) => n * 60 * 1000,
-            KlineTimeframe::Hour(n) => n * 60 * 60 * 1000,
-            KlineTimeframe::Day(n) => n * 24 * 60 * 60 * 1000,
-        };
+        let interval_millis = self.time_frame.to_inserval_millis();
         let current_start_min = recent_trade.timestamp / interval_millis;
         let candle_start_min = self.utc_begin / interval_millis;
         current_start_min > candle_start_min
     }
 
     pub fn to_sql_insert(&self) -> String {
-        let time_frame_str = match self.time_frame {
-            KlineTimeframe::Minute(n) => format!("{}m", n),
-            KlineTimeframe::Hour(n) => format!("{}h", n),
-            KlineTimeframe::Day(n) => format!("{}d", n),
-        };
         format!(
             r#"INSERT INTO public.candles (pair, time_frame, o, h, l, c,
             utc_begin, volume_bs__buy_base, volume_bs__sell_base, volume_bs__buy_quote,
             volume_bs__sell_quote) VALUES ('{}','{}',{},{},{},{},to_timestamp({}),
             {},{},{},{});"#,
             self.pair,
-            time_frame_str,
+            self.time_frame.to_str(),
             self.o,
             self.h,
             self.l,
             self.c,
-            self.utc_begin,
+            self.utc_begin / 1000,
             self.volume_bs.buy_base,
             self.volume_bs.sell_base,
             self.volume_bs.buy_quote,
