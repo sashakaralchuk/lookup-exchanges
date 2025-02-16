@@ -1,0 +1,10 @@
+version: '3.4'
+services:
+  postgres:
+    image: postgres:13.3
+    environment:
+      POSTGRES_PASSWORD: default
+      POSTGRES_USER: default
+      POSTGRES_DB: scrap-poloniex
+    ports:
+    - 5432:5432
