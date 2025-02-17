@@ -22,10 +22,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Ex::Poloniex => poloniex::public::Client::new(),
     };
     let client_fill_absent_kline = client.clone();
-    for symbol in config.poloniex_symbols.clone() {
+    for symbol in config.symbols.clone() {
         let mut m_timeframes: HashMap<KlineTimeframe, std::option::Option<Kline>> = HashMap::new();
         let mut m_timeframes_ts: HashMap<KlineTimeframe, std::option::Option<i64>> = HashMap::new();
-        for timeframe in config.poloniex_timeframes.clone() {
+        for timeframe in config.timeframes.clone() {
             m_timeframes.insert(timeframe.clone(), None);
             m_timeframes_ts.insert(timeframe.clone(), None);
             client
@@ -74,7 +74,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
     client
-        .listen_ws_channel(ChannelWs::Trade, &config.poloniex_symbols, on_message)
+        .listen_ws_channel(ChannelWs::Trade, &config.symbols, on_message)
         .await?;
     Ok(())
 }
@@ -138,8 +138,8 @@ enum Ex {
 #[derive(Clone)]
 struct Config {
     clickhouse_url: String,
-    poloniex_symbols: Vec<String>,
-    poloniex_timeframes: Vec<KlineTimeframe>,
+    symbols: Vec<String>,
+    timeframes: Vec<KlineTimeframe>,
     start_date_millis: i64,
     ex: Ex,
 }
@@ -148,12 +148,12 @@ impl Config {
     pub fn new_from_envs() -> Self {
         Self {
             clickhouse_url: std::env::var("CLICKHOUSE_URL").unwrap(),
-            poloniex_symbols: std::env::var("CONFIG_SYMBOLS")
+            symbols: std::env::var("CONFIG_SYMBOLS")
                 .unwrap()
                 .split(',')
                 .map(|s| s.to_string())
                 .collect::<Vec<String>>(),
-            poloniex_timeframes: std::env::var("CONFIG_TIMEFRAMES")
+            timeframes: std::env::var("CONFIG_TIMEFRAMES")
                 .unwrap()
                 .split(',')
                 .map(KlineTimeframe::new_from_str)
