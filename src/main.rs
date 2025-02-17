@@ -155,7 +155,7 @@ mod poloniex_pub {
             };
             let msg_str = msg.to_text().unwrap();
             log::debug!("msg_str={msg_str}");
-            if let Ok(_) = serde_json::from_str::<EventWsPingRaw>(msg_str) {
+            if serde_json::from_str::<EventWsPingRaw>(msg_str).is_ok() {
                 continue;
             }
             if let Ok(o) = serde_json::from_str::<EventWsSubscribeRaw>(msg_str) {
@@ -214,16 +214,11 @@ mod poloniex_pub {
             let res_text = res.text().await.unwrap();
             let mut res_obj: Vec<EventHttpKlineRaw> = serde_json::from_str(&res_text).unwrap();
             res_obj.sort_by(|a, b| a.12.partial_cmp(&b.12).unwrap());
-            klines.extend(
-                res_obj
-                    .iter()
-                    .map(|o| o.to_kline(&symbol.to_string()))
-                    .into_iter(),
-            );
+            klines.extend(res_obj.iter().map(|o| o.to_kline(symbol)));
             log::info!("res_obj={:?}", res_obj.len());
         }
         log::info!("klines.len()={}", klines.len());
-        return Ok(klines);
+        Ok(klines)
     }
 
     pub async fn fetch_insert_klines(
@@ -244,7 +239,7 @@ mod poloniex_pub {
                 LIMIT 1
                 "#,
             )
-            .bind(&symbol)
+            .bind(symbol)
             .bind(&timeframe.to_str())
             .fetch::<i32>()
             .unwrap()
@@ -369,7 +364,7 @@ mod poloniex_pub {
     );
 
     impl EventHttpKlineRaw {
-        fn to_kline(&self, symbol: &String) -> Kline {
+        fn to_kline(&self, symbol: &str) -> Kline {
             let time_frame = match self.11.as_str() {
                 "MINUTE_1" => KlineTimeframe::Minute(1),
                 "MINUTE_15" => KlineTimeframe::Minute(15),
@@ -379,7 +374,7 @@ mod poloniex_pub {
             };
             Kline {
                 time_frame,
-                pair: symbol.clone(),
+                pair: symbol.to_owned(),
                 o: self.2.parse().unwrap(),
                 h: self.1.parse().unwrap(),
                 l: self.0.parse().unwrap(),
@@ -455,6 +450,7 @@ impl KlineTimeframe {
     }
 }
 
+#[allow(clippy::upper_case_acronyms)]
 #[derive(Debug, Clone)]
 struct VBS {
     buy_base: f64,
@@ -572,15 +568,13 @@ impl Config {
             clickhouse_url: std::env::var("CLICKHOUSE_URL").unwrap(),
             poloniex_symbols: std::env::var("CONFIG_SYMBOLS")
                 .unwrap()
-                .split(",")
-                .into_iter()
+                .split(',')
                 .map(|s| s.to_string())
                 .collect::<Vec<String>>(),
             poloniex_timeframes: std::env::var("CONFIG_TIMEFRAMES")
                 .unwrap()
-                .split(",")
-                .into_iter()
-                .map(|s| KlineTimeframe::new_from_str(s))
+                .split(',')
+                .map(KlineTimeframe::new_from_str)
                 .collect::<Vec<KlineTimeframe>>(),
             start_date_millis: chrono::NaiveDate::parse_from_str(
                 &std::env::var("START_DATE").unwrap(),
