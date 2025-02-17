@@ -164,20 +164,20 @@ pub enum EventWs {
 pub trait ClientPublic {
     fn new() -> Self;
 
-    async fn listen_ws_channel(
+    fn listen_ws_channel(
         &self,
         channel: ChannelWs,
         symbols: &Vec<String>,
         on_message: impl FnMut(EventWs),
-    ) -> Result<(), Box<dyn std::error::Error>>;
+    ) -> impl std::future::Future<Output = Result<(), Box<dyn std::error::Error>>>;
 
-    async fn fetch_insert_klines(
+    fn fetch_insert_klines(
         &self,
         client_clickhouse: &clickhouse::Client,
         start_date_millis: i64,
         symbol: &String,
         timeframe: &KlineTimeframe,
-    ) -> Result<(), Box<dyn std::error::Error>>;
+    ) -> impl std::future::Future<Output = Result<(), Box<dyn std::error::Error>>>;
 }
 
 fn now_millis() -> i64 {

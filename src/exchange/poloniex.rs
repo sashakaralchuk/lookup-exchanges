@@ -103,6 +103,9 @@ pub mod public {
                 Some(ts) => (ts as i64) * 1000 + timeframe.to_inserval_millis(),
                 None => start_date_millis,
             };
+            if start_millis >= end_millis - timeframe.to_inserval_millis() {
+                return Ok(());
+            }
             let klines = fetch_klines(symbol, timeframe.clone(), start_millis, end_millis).await?;
             log::info!(
                 "save klines to db symbol={} timeframe={:?} klines.len()={}",
