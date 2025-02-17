@@ -22,7 +22,7 @@ pub mod public {
         async fn listen_ws_channel(
             &self,
             channel: ChannelWs,
-            symbols: &Vec<String>,
+            symbols: &[String],
             on_message: impl FnMut(EventWs),
         ) -> Result<(), Box<dyn std::error::Error>> {
             let (mut socket, _) = connect_async(URL_WS).await?;
@@ -60,7 +60,7 @@ pub mod public {
                 if serde_json::from_str::<EventWsPingRaw>(msg_str).is_ok() {
                     continue;
                 }
-                if let Ok(_) = serde_json::from_str::<EventWsSubscribeRaw>(msg_str) {
+                if serde_json::from_str::<EventWsSubscribeRaw>(msg_str).is_ok() {
                     f(EventWs::Subscribe);
                     continue;
                 }

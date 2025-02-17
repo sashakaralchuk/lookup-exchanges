@@ -167,7 +167,7 @@ pub trait ClientPublic {
     fn listen_ws_channel(
         &self,
         channel: ChannelWs,
-        symbols: &Vec<String>,
+        symbols: &[String],
         on_message: impl FnMut(EventWs),
     ) -> impl std::future::Future<Output = Result<(), Box<dyn std::error::Error>>>;
 

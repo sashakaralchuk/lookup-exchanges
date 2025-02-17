@@ -113,20 +113,20 @@ fn apply_trade(
         }
         if curr_kline.is_none() {
             log::debug!("start constructing new kline");
-            curr_kline.replace(Kline::new_from_trade(timeframe.clone(), &trade));
+            curr_kline.replace(Kline::new_from_trade(timeframe.clone(), trade));
             tx_fill_absent_kline
                 .send((trade.pair.clone(), timeframe.clone()))
                 .unwrap();
             continue;
         }
-        if curr_kline.as_mut().unwrap().expired(&trade) {
+        if curr_kline.as_mut().unwrap().expired(trade) {
             tx_curr_kline
                 .send(curr_kline.as_mut().unwrap().clone())
                 .unwrap();
-            curr_kline.replace(Kline::new_from_trade(timeframe.clone(), &trade));
+            curr_kline.replace(Kline::new_from_trade(timeframe.clone(), trade));
             continue;
         }
-        curr_kline.as_mut().unwrap().apply_recent_trade(&trade);
+        curr_kline.as_mut().unwrap().apply_recent_trade(trade);
     }
 }
 
