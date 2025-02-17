@@ -152,6 +152,34 @@ pub struct KlineRow {
     volume_bs__sell_quote: f64,
 }
 
+pub enum ChannelWs {
+    Trade,
+}
+
+pub enum EventWs {
+    Subscribe,
+    Trade(RecentTrade),
+}
+
+pub trait ClientPublic {
+    fn new() -> Self;
+
+    async fn listen_ws_channel(
+        &self,
+        channel: ChannelWs,
+        symbols: &Vec<String>,
+        on_message: impl FnMut(EventWs),
+    ) -> Result<(), Box<dyn std::error::Error>>;
+
+    async fn fetch_insert_klines(
+        &self,
+        client_clickhouse: &clickhouse::Client,
+        start_date_millis: i64,
+        symbol: &String,
+        timeframe: &KlineTimeframe,
+    ) -> Result<(), Box<dyn std::error::Error>>;
+}
+
 fn now_millis() -> i64 {
     chrono::Utc::now().timestamp_millis()
 }
