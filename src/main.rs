@@ -285,10 +285,12 @@ mod poloniex_pub {
     }
 
     pub enum EventWs {
+        #[allow(dead_code)]
         Subscribe(EventWsSubscribeRaw),
         Trade(EventWsTradeRaw),
     }
 
+    #[allow(dead_code)]
     #[derive(serde::Deserialize)]
     pub struct EventWsSubscribeRaw {
         pub event: String,
@@ -296,6 +298,7 @@ mod poloniex_pub {
         pub symbols: Vec<String>,
     }
 
+    #[allow(dead_code)]
     #[derive(serde::Deserialize)]
     pub struct EventWsPingRaw {
         pub event: String,
@@ -303,21 +306,23 @@ mod poloniex_pub {
 
     #[derive(serde::Deserialize)]
     pub struct EventWsTradeRaw {
+        #[allow(dead_code)]
         pub channel: String,
         pub data: Vec<EventWsTradeRawData>,
     }
 
+    #[allow(non_snake_case)]
     #[derive(serde::Deserialize)]
     pub struct EventWsTradeRawData {
         symbol: String,
         amount: String,
+        #[allow(dead_code)]
         quantity: String,
-        #[allow(non_snake_case)]
         takerSide: String,
-        #[allow(non_snake_case)]
         createTime: i64,
         price: String,
         id: String,
+        #[allow(dead_code)]
         ts: i64,
     }
 
@@ -337,7 +342,7 @@ mod poloniex_pub {
         }
     }
 
-    #[derive(serde::Deserialize, Debug)]
+    #[derive(serde::Deserialize)]
     pub struct EventHttpKlineRaw(
         #[serde(rename = "low")] String,
         #[serde(rename = "high")] String,
@@ -347,12 +352,20 @@ mod poloniex_pub {
         #[serde(rename = "quantity")] String,
         #[serde(rename = "buyTakerAmount")] String,
         #[serde(rename = "buyTakerQuantity")] String,
-        #[serde(rename = "tradeCount")] i64,
-        #[serde(rename = "ts")] i64,
-        #[serde(rename = "weightedAverage")] String,
+        #[allow(dead_code)]
+        #[serde(rename = "tradeCount")]
+        i64,
+        #[allow(dead_code)]
+        #[serde(rename = "ts")]
+        i64,
+        #[allow(dead_code)]
+        #[serde(rename = "weightedAverage")]
+        String,
         #[serde(rename = "interval")] String,
         #[serde(rename = "startTime")] i64,
-        #[serde(rename = "closeTime")] i64,
+        #[allow(dead_code)]
+        #[serde(rename = "closeTime")]
+        i64,
     );
 
     impl EventHttpKlineRaw {
@@ -518,6 +531,7 @@ impl Kline {
     }
 }
 
+#[allow(non_snake_case)]
 #[derive(clickhouse::Row, serde::Serialize)]
 struct KlineRow {
     pair: String,
